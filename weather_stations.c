@@ -1,3 +1,5 @@
+/* The program processes multiple CSV-formatted text files provided via command-line arguments. Each file corresponds to a temperature zone and contains lines formatted as date,temperature, where only the temperature (second column) is parsed and averaged—date values in the first column are ignored. A separate thread is created for each file to compute the average temperature concurrently. After all threads finish, the program prints the average temperature for each zone and identifies the warmest and coldest zones. */ 
+
 #define _GNU_SOURCE 
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,17 +7,13 @@
 #include <sched.h>
 #include <unistd.h>
 #include <string.h>
-#include <GLFW/glfw3.h>
 
 #define MAX_LINE 256
 #define MAX_FILE_NAME 256
-#define MAX_ZONES 16  // límite razonable para demo
 
 typedef struct {
   char filename[MAX_FILE_NAME];
   char zone_name[40];
-  double *temperatures;  // arreglo dinámico con temperaturas
-  int count;             // cantidad de datos
   double mean;
   int thread_index;
 } StationData;
@@ -47,28 +45,21 @@ void *check_zone(void *arg) {
   if (!file) error("error opening file");
 
   char buffer_line[MAX_LINE];
-  fgets(buffer_line, MAX_LINE, file);  // saltar header si existe
+  fgets(buffer_line, MAX_LINE, file);
 
-  data->temperatures = NULL;
-  data->count = 0;
-
+  double add = 0.0;
+  int counter = 0;
   while (fgets(buffer_line, MAX_LINE, file)) {
-    char *token = strtok(buffer_line, ",");  // fecha ignorada
-    token = strtok(NULL, ",");                // temperatura
+    char *token = strtok(buffer_line, ",");
+    token = strtok(NULL, ",");
     if (token) {
-      double temp = atof(token);
-      data->temperatures = realloc(data->temperatures, (data->count + 1) * sizeof(double));
-      if (!data->temperatures) error("realloc failed");
-      data->temperatures[data->count] = temp;
-      data->count++;
+      add += atof(token);
+      counter++;
     }
   }
   fclose(file);
 
-  // calcular promedio
-  double add = 0.0;
-  for (int i = 0; i < data->count; i++) add += data->temperatures[i];
-  data->mean = add / data->count;
+  data->mean = add / counter;
 
   pthread_mutex_lock(&mutex);
   if (data->mean > max_mean) {
@@ -80,81 +71,23 @@ void *check_zone(void *arg) {
     strcpy(min_zone, data->zone_name);
   }
   end_threads++;
-  pthread_cond_signal(&cond);
+  pthread_cond_signal(&cond); // notificar al hijo principal fin de condicion de espera
   pthread_mutex_unlock(&mutex);
 
   pthread_exit(NULL);
-}
-
-void draw_graph(StationData *data, int n_files) {
-  if (!glfwInit()) error("Failed to initialize GLFW");
-
-  GLFWwindow* window = glfwCreateWindow(800, 600, "Temperature Zones", NULL, NULL);
-  if (!window) {
-    glfwTerminate();
-    error("Failed to create GLFW window");
-  }
-
-  glfwMakeContextCurrent(window);
-
-  // Configuración básica OpenGL
-  glClearColor(1.0, 1.0, 1.0, 1.0);
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  glOrtho(0, 100, -10, 50, -1, 1); // Ajusta según máximo conteo y rango temp
-
-  glMatrixMode(GL_MODELVIEW);
-  glLoadIdentity();
-
-  // Colores para hasta 16 zonas
-  float colors[MAX_ZONES][3] = {
-    {1,0,0}, {0,1,0}, {0,0,1}, {1,1,0}, {1,0,1}, {0,1,1},
-    {0.5,0,0}, {0,0.5,0}, {0,0,0.5}, {0.5,0.5,0}, {0.5,0,0.5}, {0,0.5,0.5},
-    {0.7,0.3,0}, {0.3,0.7,0}, {0,0.3,0.7}, {0.7,0,0.3}
-  };
-
-  while (!glfwWindowShouldClose(window)) {
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    // Dibujar cada zona
-    for (int z = 0; z < n_files; z++) {
-      glColor3fv(colors[z % MAX_ZONES]);
-      glBegin(GL_LINE_STRIP);
-      for (int i = 0; i < data[z].count; i++) {
-        // X: tiempo (índice), Y: temperatura
-        // Normaliza X a rango [0..100] para ventana 800 px ancho
-        float x = ((float)i / (data[z].count > 1 ? (data[z].count - 1) : 1)) * 100.0f;
-        float y = (float)data[z].temperatures[i];
-        glVertex2f(x, y);
-      }
-      glEnd();
-    }
-
-    glfwSwapBuffers(window);
-    glfwPollEvents();
-  }
-
-  glfwDestroyWindow(window);
-  glfwTerminate();
 }
 
 int main(int argc, char *argv[]) {
   if (argc < 2) error("uso: archivo1.txt archivo2.txt...");
 
   int n_files = argc - 1;
-  if (n_files > MAX_ZONES) error("Demasiados archivos, max 16");
-
   pthread_t* threads = malloc(n_files * sizeof(pthread_t));
   StationData* data = malloc(n_files * sizeof(StationData));
-  if (!threads || !data) error("malloc failed");
 
   for (int i = 0; i < n_files; ++i) {
     strncpy(data[i].filename, argv[i + 1], sizeof(data[i].filename));
     snprintf(data[i].zone_name, sizeof(data[i].zone_name), "Zona %d", i + 1);
     data[i].mean = 0.0;
-    data[i].temperatures = NULL;
-    data[i].count = 0;
-    data[i].thread_index = i;
 
     if (pthread_create(&threads[i], NULL, check_zone, &data[i]) != 0)
       error("error creating thread");
@@ -171,18 +104,11 @@ int main(int argc, char *argv[]) {
 
   printf("Results:\n");
   for (int i = 0; i < n_files; ++i)
-    printf("%s: Promedio = %.2f°C (Datos: %d)\n", data[i].zone_name, data[i].mean, data[i].count);
-  printf("Zona más cálida: %s (%.2f°C)\n", max_zone, max_mean);
-  printf("Zona menos cálida: %s (%.2f°C)\n", min_zone, min_mean);
+    printf("%s: Promedio = %.2f°C\n", data[i].zone_name, data[i].mean);
+  printf("Zona mas calida: %s (%.2f°C)\n", max_zone, max_mean);
+  printf("Zona menos calida %s (%.2f°C)\n", min_zone, min_mean);
 
-  draw_graph(data, n_files);
-
-  // Liberar memoria
-  for (int i = 0; i < n_files; i++)
-    free(data[i].temperatures);
   free(threads);
   free(data);
-
   return EXIT_SUCCESS;
 }
-
