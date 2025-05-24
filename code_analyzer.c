@@ -85,6 +85,7 @@ void *consumer_lines(void *_) {
 
     for (int i = 0; i < lines_in_buffer; ++i) {
       printf("[Líneas]  Línea %d: %s", current_line + i + 1, buffer_lines[i]);
+      total_lines++;
     }
 
     pthread_mutex_unlock(&buffer_mutex);
@@ -171,7 +172,6 @@ int main(int argc, char *argv[]) {
       if (fgets(line, sizeof(line), file)) {
         buffer_lines[i] = strdup(line);
         lines_in_buffer++;
-        total_lines++;
       } else {
         break;
       }
