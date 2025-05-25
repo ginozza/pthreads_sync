@@ -1,10 +1,10 @@
 #include <pthread.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_LINE 85
 #define BUFFER_LINES 3
 
 char *buffer_lines[BUFFER_LINES];
@@ -59,16 +59,18 @@ int is_comment_line(const char *line) {
 }
 
 int line_contains_keyword(const char *line, const char *keyword) {
-  char line_copy[MAX_LINE];
-  strncpy(line_copy, line, MAX_LINE);
-  line_copy[MAX_LINE - 1] = '\0'; 
+  char *line_copy = strdup(line);
+  if (!line_copy) error("strdup failed in line_contains_keyword");
 
   char *token = strtok(line_copy, token_delimiters);
   while (token != NULL) {
-    if (strcmp(token, keyword) == 0)
+    if (strcmp(token, keyword) == 0) {
+      free(line_copy);
       return 1;
+    }
     token = strtok(NULL, token_delimiters);
   }
+  free(line_copy);
   return 0;
 }
 
@@ -163,14 +165,20 @@ int main(int argc, char *argv[]) {
   pthread_create(&thread_comments, NULL, consumer_comments, NULL);
   pthread_create(&thread_keywords, NULL, consumer_keywords, NULL);
 
-  char line[MAX_LINE];
+  char *line = NULL;
+  size_t len = 0;
+  ssize_t read;
+
   while (1) {
     pthread_mutex_lock(&buffer_mutex);
 
     lines_in_buffer = 0;
     for (int i = 0; i < BUFFER_LINES; ++i) {
-      if (fgets(line, sizeof(line), file)) {
-        buffer_lines[i] = strdup(line);
+      read = getline(&line, &len, file);
+      if (read != - 1) {
+        buffer_lines[i] = line;
+        line = NULL;
+        len = 0;
         lines_in_buffer++;
       } else {
         break;
