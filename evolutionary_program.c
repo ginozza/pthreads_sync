@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -20,7 +21,6 @@ typedef struct {
   pthread_barrier_t* barrier;
   int* current_generation;
   int total_generations;
-  pthread_mutex_t* individuals_mutex;
 } ThreadArgs;
 
 Individual* g_individuals;
@@ -68,7 +68,6 @@ void* worker_thread(void* arg) {
   pthread_barrier_t* barrier = args->barrier;
   int* current_generation = args->current_generation;
   int total_generations = args->total_generations;
-  pthread_mutex_t* individuals_mutex = args->individuals_mutex;
 
   while (1) {
     pthread_barrier_wait(barrier);
@@ -86,21 +85,6 @@ void* worker_thread(void* arg) {
     }
 
     pthread_barrier_wait(barrier);
-
-    if (args->thread_id == 0) {
-      pthread_mutex_lock(individuals_mutex);
-      qsort(g_individuals, g_n_individuals, sizeof(Individual), compare_individuals);
-      pthread_mutex_unlock(individuals_mutex);
-
-      println("Generacion %d", *current_generation);
-      for (int i = 0; i < g_n_individuals && i < 10; ++i)
-        println("  Individuo %d: F1=%.2f, F2=%.2f, Fitness=%.2f",
-                i + 1,
-                g_individuals[i].feature1,
-                g_individuals[i].feature2,
-                g_individuals[i].fitness);
-    }
-    
     pthread_barrier_wait(barrier);
   }
   pthread_exit(NULL);
@@ -143,7 +127,6 @@ int main(int argc, char* argv[]) {
     thread_args[i].barrier = &generation_barrier;
     thread_args[i].current_generation = &g_current_generation;
     thread_args[i].total_generations = g_total_generations;
-    thread_args[i].individuals_mutex = &individuals_mutex;
 
     if (pthread_create(&threads[i], NULL, worker_thread, (void*)&thread_args[i]) != 0)
       error("error pthread_create");
@@ -154,7 +137,21 @@ int main(int argc, char* argv[]) {
   for (int k = 1; k <= g_total_generations; ++k) {
     g_current_generation = k;
     pthread_barrier_wait(&generation_barrier);
+
     pthread_barrier_wait(&generation_barrier);
+
+    pthread_mutex_lock(&individuals_mutex);
+    qsort(g_individuals, g_n_individuals, sizeof(Individual), compare_individuals);
+    pthread_mutex_unlock(&individuals_mutex);
+
+    println("Generacion %d", k);
+    for (int i = 0; i < g_n_individuals && i < 10; ++i)
+      println("  Individuo %d: F1=%.2f, F2=%.2f, Fitness=%.2f",
+              i + 1,
+              g_individuals[i].feature1,
+              g_individuals[i].feature2,
+              g_individuals[i].fitness);
+    
     pthread_barrier_wait(&generation_barrier);
   }
 
