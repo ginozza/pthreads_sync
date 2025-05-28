@@ -86,7 +86,6 @@ int value_1_to_2(int **input_matrix, int x, int y, int rows, int cols) {
 void *worker_thread(void *arg) {
   int thread_id = (int)(intptr_t)arg;
   for (int t = 0; t < shifts; ++t) {
-    pthread_barrier_wait(&barrier);
 
     if (thread_id == 0) {
       for (int x = 0; x < matrix_rows_size; ++x) {
@@ -169,7 +168,6 @@ int main(int argc, char *argv[]) {
   }
 
   for (int i = 1; i <= shifts; ++i) {
-    pthread_barrier_wait(&barrier);
     pthread_barrier_wait(&barrier);
     pthread_barrier_wait(&barrier);
 
